@@ -650,7 +650,21 @@ export default function Home() {
   setJoinCode("");
   setMessage("");
 }
+function forceReset() {
+  localStorage.clear();
+  location.href = "/";
+}
 
+function ForceResetButton() {
+  return (
+    <button
+      onClick={forceReset}
+      className="fixed right-4 top-4 z-50 rounded-2xl border border-white/10 bg-black/70 px-4 py-3 text-sm font-bold text-white backdrop-blur-xl"
+    >
+      초기화
+    </button>
+  );
+}
   function moveItem(index: number, direction: "up" | "down") {
     const nextItems = [...orderedItems];
     const targetIndex = direction === "up" ? index - 1 : index + 1;
@@ -668,6 +682,7 @@ export default function Home() {
   if (!room) {
     return (
       <main className="min-h-screen bg-[#080812] text-white flex items-center justify-center p-6">
+        <ForceResetButton />
         <div className="w-full max-w-md rounded-3xl border border-white/10 bg-white/10 p-6 backdrop-blur-xl">
           <p className="text-sm font-bold tracking-[0.2em] text-cyan-300">
             RANKING PARTY
@@ -725,6 +740,7 @@ export default function Home() {
   if (room.status === "waiting") {
     return (
       <main className="min-h-screen bg-[#080812] text-white flex items-center justify-center p-6">
+        <ForceResetButton />
         <div className="w-full max-w-md rounded-3xl border border-white/10 bg-white/10 p-6 backdrop-blur-xl">
           <p className="text-sm font-bold tracking-[0.2em] text-cyan-300">
             WAITING ROOM
@@ -795,6 +811,7 @@ export default function Home() {
   if (room.status === "playing" && currentRound) {
     return (
       <main className="min-h-screen bg-[#080812] text-white flex items-center justify-center p-6">
+        <ForceResetButton />
         <div className="w-full max-w-xl rounded-3xl border border-white/10 bg-white/10 p-6 backdrop-blur-xl">
           <div className="flex items-start justify-between gap-4">
             <div>
@@ -909,6 +926,7 @@ export default function Home() {
 
     return (
       <main className="min-h-screen bg-[#080812] text-white flex items-center justify-center p-6">
+        <ForceResetButton />
         <div className="w-full max-w-xl rounded-3xl border border-white/10 bg-white/10 p-6 backdrop-blur-xl">
           <p className="text-sm font-bold tracking-[0.2em] text-cyan-300">
             ROUND RESULT
@@ -994,6 +1012,7 @@ export default function Home() {
   if (room.status === "finished") {
     return (
       <main className="min-h-screen bg-[#080812] text-white flex items-center justify-center p-6">
+        <ForceResetButton />
         <div className="w-full max-w-xl rounded-3xl border border-white/10 bg-white/10 p-6 text-center backdrop-blur-xl">
           <p className="text-sm font-bold tracking-[0.2em] text-cyan-300">
             FINAL RESULT
