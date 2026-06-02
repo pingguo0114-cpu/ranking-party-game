@@ -610,24 +610,27 @@ export default function Home() {
   }
 
   async function leaveRoom() {
-    if (playerId) {
-      await supabase
-        .from("players")
-        .update({
-          is_online: false,
-        })
-        .eq("id", playerId);
-    }
-
-    localStorage.clear();
-    setRoom(null);
-    setPlayers([]);
-    setCurrentRound(null);
-    setSubmissions([]);
-    setPlayerId("");
-    setOrderedItems([]);
-    setMessage("");
+  if (playerId) {
+    await supabase
+      .from("players")
+      .update({
+        is_online: false,
+      })
+      .eq("id", playerId);
   }
+
+  localStorage.clear();
+
+  setRoom(null);
+  setPlayers([]);
+  setCurrentRound(null);
+  setSubmissions([]);
+  setPlayerId("");
+  setOrderedItems([]);
+  setPlayerName("");
+  setJoinCode("");
+  setMessage("");
+}
 
   function moveItem(index: number, direction: "up" | "down") {
     const nextItems = [...orderedItems];
@@ -955,6 +958,15 @@ export default function Home() {
               {message}
             </p>
           )}
+          <button
+  onClick={() => {
+    localStorage.clear();
+    location.reload();
+  }}
+  className="mt-3 w-full rounded-2xl border border-white/10 bg-white/5 px-5 py-4 font-bold text-white"
+>
+  저장된 방 정보 초기화
+</button>
         </div>
       </main>
     );
