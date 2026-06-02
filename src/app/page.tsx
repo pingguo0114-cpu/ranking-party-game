@@ -274,17 +274,36 @@ export default function Home() {
   }, [fetchRoomState]);
 
   useEffect(() => {
-    const timer = setInterval(() => {
-      setTick((value) => value + 1);
+  const params = new URLSearchParams(window.location.search);
+  const shouldReset = params.get("reset") === "1";
 
-      const savedRoomId = localStorage.getItem("roomId");
-      if (savedRoomId) {
-        fetchRoomState(savedRoomId);
-      }
-    }, 1500);
+  if (shouldReset) {
+    localStorage.clear();
 
-    return () => clearInterval(timer);
-  }, [fetchRoomState]);
+    setRoom(null);
+    setPlayers([]);
+    setCurrentRound(null);
+    setSubmissions([]);
+    setPlayerId("");
+    setOrderedItems([]);
+    setPlayerName("");
+    setJoinCode("");
+    setMessage("");
+
+    window.history.replaceState(null, "", window.location.pathname);
+    return;
+  }
+
+  const savedRoomId = localStorage.getItem("roomId");
+  const savedPlayerId = localStorage.getItem("playerId");
+  const savedPlayerName = localStorage.getItem("playerName");
+
+  if (savedRoomId && savedPlayerId) {
+    setPlayerId(savedPlayerId);
+    setPlayerName(savedPlayerName ?? "");
+    fetchRoomState(savedRoomId);
+  }
+}, [fetchRoomState]);
 
   useEffect(() => {
     if (!room || !currentRound) return;
