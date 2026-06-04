@@ -66,22 +66,46 @@ const fallbackQuestions: Question[] = [
   {
     title: "술자리에서 분위기 깨는 행동 Top 5",
     source: "샘플 설문 데이터",
-    answer: ["계속 휴대폰만 보기", "술 강요하기", "혼자 진지한 얘기만 하기", "계산할 때 사라지기", "같은 말 반복하기"],
+    answer: [
+      "계속 휴대폰만 보기",
+      "술 강요하기",
+      "혼자 진지한 얘기만 하기",
+      "계산할 때 사라지기",
+      "같은 말 반복하기",
+    ],
   },
   {
     title: "직장인이 뽑은 꼴불견 동료 Top 5",
     source: "샘플 설문 데이터",
-    answer: ["남 탓하는 사람", "말만 하고 일 안 하는 사람", "지각이 잦은 사람", "뒷담화하는 사람", "공을 가로채는 사람"],
+    answer: [
+      "남 탓하는 사람",
+      "말만 하고 일 안 하는 사람",
+      "지각이 잦은 사람",
+      "뒷담화하는 사람",
+      "공을 가로채는 사람",
+    ],
   },
   {
     title: "친구에게 가장 서운한 순간 Top 5",
     source: "샘플 설문 데이터",
-    answer: ["약속을 쉽게 취소할 때", "내 얘기를 안 들을 때", "연락을 일부러 늦게 볼 때", "돈 문제로 애매하게 굴 때", "비밀을 말했을 때"],
+    answer: [
+      "약속을 쉽게 취소할 때",
+      "내 얘기를 안 들을 때",
+      "연락을 일부러 늦게 볼 때",
+      "돈 문제로 애매하게 굴 때",
+      "비밀을 말했을 때",
+    ],
   },
   {
     title: "소개팅에서 호감 떨어지는 행동 Top 5",
     source: "샘플 설문 데이터",
-    answer: ["무례한 말투", "계속 휴대폰 보기", "전 연인 이야기", "일방적인 자기 자랑", "계산 매너 없음"],
+    answer: [
+      "무례한 말투",
+      "계속 휴대폰 보기",
+      "전 연인 이야기",
+      "일방적인 자기 자랑",
+      "계산 매너 없음",
+    ],
   },
   {
     title: "한국인이 선호하는 배달음식 Top 5",
@@ -137,6 +161,12 @@ function calculateScore(answer: string[], orderedItems: string[], difficulty: nu
 
   orderedItems.forEach((item, index) => {
     const correctIndex = answer.indexOf(item);
+
+    if (correctIndex === -1) {
+      totalError += 5;
+      return;
+    }
+
     const diff = Math.abs(correctIndex - index);
     totalError += diff;
   });
@@ -173,7 +203,9 @@ export default function Home() {
   const [playerId, setPlayerId] = useState("");
   const [orderedItems, setOrderedItems] = useState<string[]>([]);
   const [isSubmitting, setIsSubmitting] = useState(false);
+
   const [tick, setTick] = useState(0);
+  const [serverTimeOffset, setServerTimeOffset] = useState(0);
 
   const isHost = room?.host_player_id === playerId;
 
@@ -185,25 +217,52 @@ export default function Home() {
     if (!currentRound?.ends_at) return 0;
 
     const endTime = new Date(currentRound.ends_at).getTime();
-    const now = Date.now();
-    return Math.max(0, Math.ceil((endTime - now) / 1000));
-  }, [currentRound?.ends_at, tick]); const [serverTimeOffset, setServerTimeOffset] = useState(0);
+    const correctedNow = Date.now() + serverTimeOffset;
+
+    return Math.max(0, Math.ceil((endTime - correctedNow) / 1000));
+  }, [currentRound?.ends_at, tick, serverTimeOffset]);
 
   const sortedPlayers = useMemo(() => {
     return [...players].sort((a, b) => b.score - a.score);
   }, [players]);
 
   const fetchRoomState = useCallback(async (targetRoomId: string) => {
-    const { data: roomData, error: roomError } = await supabase
-      .from("rooms")
-      .select("*")
-      .eq("id", targetRoomId)
-      .single();
+const { data: roomData, error: roomError } = await supabase
+  .from("rooms")
+  .select("*")
+  .eq("id", targetRoomId)
+  .maybeSingle();
 
-    if (roomError || !roomData) {
-      console.error("Room fetch error:", roomError);
-      return;
-    }
+if (roomError) {
+  console.warn("Room fetch failed:", {
+    message: roomError.message,
+    details: roomError.details,
+    hint: roomError.hint,
+    code: roomError.code,
+    raw: roomError,
+  });
+
+  setMessage("방 정보를 불러오지 못했어. 다시 처음부터 시작해줘.");
+  return;
+}
+
+if (!roomData) {
+  console.warn("Saved room does not exist anymore. Resetting local state.");
+
+  localStorage.clear();
+
+  setRoom(null);
+  setPlayers([]);
+  setCurrentRound(null);
+  setSubmissions([]);
+  setPlayerId("");
+  setOrderedItems([]);
+  setPlayerName("");
+  setJoinCode("");
+  setMessage("이전 방 정보를 찾을 수 없어서 초기화했어. 새 방을 만들어줘.");
+
+  return;
+}
 
     const typedRoom = roomData as Room;
     setRoom(typedRoom);
@@ -223,20 +282,20 @@ export default function Home() {
 
     if (typedRoom.current_round > 0) {
       const { data: roundData, error: roundError } = await supabase
-  .from("rounds")
-  .select("*")
-  .eq("room_id", targetRoomId)
-  .eq("round_number", typedRoom.current_round)
-  .maybeSingle();
+        .from("rounds")
+        .select("*")
+        .eq("room_id", targetRoomId)
+        .eq("round_number", typedRoom.current_round)
+        .maybeSingle();
 
       if (roundError) {
-  console.error("Round fetch error:", roundError);
-  return;
-}
+        console.error("Round fetch error:", roundError);
+        return;
+      }
 
-if (!roundData) {
-  return;
-}
+      if (!roundData) {
+        return;
+      }
 
       const typedRound = roundData as GameRound;
       setCurrentRound(typedRound);
@@ -256,20 +315,60 @@ if (!roundData) {
       const savedRoundId = localStorage.getItem("currentRoundId");
       if (savedRoundId !== typedRound.id) {
         localStorage.setItem("currentRoundId", typedRound.id);
-        const mixed = shuffle(typedRound.question_json.answer);
-        setOrderedItems(mixed);
+        setOrderedItems(shuffle(typedRound.question_json.answer));
+        setMessage("");
+        setIsSubmitting(false);
       }
     } else {
       setCurrentRound(null);
       setSubmissions([]);
+      localStorage.removeItem("currentRoundId");
     }
   }, []);
 
-useEffect(() => {
-  const params = new URLSearchParams(window.location.search);
-  const shouldReset = params.get("reset") === "1";
+async function syncServerTime() {
+  const startedAt = Date.now();
 
-  if (shouldReset) {
+  const { data, error } = await supabase.rpc("get_server_time");
+
+  const endedAt = Date.now();
+
+  if (error || !data) {
+    console.warn("Server time sync failed:", {
+      message: error?.message,
+      details: error?.details,
+      hint: error?.hint,
+      code: error?.code,
+      raw: error,
+    });
+    return;
+  }
+
+  const roundTripMs = endedAt - startedAt;
+  const estimatedServerNow = new Date(data).getTime() + roundTripMs / 2;
+
+  setServerTimeOffset(estimatedServerNow - endedAt);
+}
+
+  async function getCorrectedServerNow() {
+    const startedAt = Date.now();
+
+    const { data, error } = await supabase.rpc("get_server_time");
+
+    const endedAt = Date.now();
+
+    if (error || !data) {
+      console.error("Server time fetch error:", error);
+      return new Date(Date.now() + serverTimeOffset);
+    }
+
+    const roundTripMs = endedAt - startedAt;
+    const estimatedServerNow = new Date(data).getTime() + roundTripMs / 2;
+
+    return new Date(estimatedServerNow);
+  }
+
+  function forceReset() {
     localStorage.clear();
 
     setRoom(null);
@@ -281,143 +380,169 @@ useEffect(() => {
     setPlayerName("");
     setJoinCode("");
     setMessage("");
+    setIsSubmitting(false);
 
-    window.history.replaceState(null, "", window.location.pathname);
-    return;
+    window.location.replace("/");
   }
 
-  const savedRoomId = localStorage.getItem("roomId");
-  const savedPlayerId = localStorage.getItem("playerId");
-  const savedPlayerName = localStorage.getItem("playerName");
-
-  if (savedRoomId && savedPlayerId) {
-    setPlayerId(savedPlayerId);
-    setPlayerName(savedPlayerName ?? "");
-    fetchRoomState(savedRoomId);
-  }
-}, [fetchRoomState]);
-
-async function syncServerTime() {
-  const startedAt = Date.now();
-
-  const { data, error } = await supabase.rpc("get_server_time");
-
-  const endedAt = Date.now();
-
-  if (error || !data) {
-    console.error("Server time sync error:", error);
-    return;
+  function ForceResetButton() {
+    return (
+      <button
+        onClick={forceReset}
+        className="fixed right-4 top-4 z-50 rounded-2xl border border-white/10 bg-black/70 px-4 py-3 text-sm font-bold text-white backdrop-blur-xl"
+      >
+        초기화
+      </button>
+    );
   }
 
-  const roundTripMs = endedAt - startedAt;
-  const estimatedServerNow = new Date(data).getTime() + roundTripMs / 2;
+  useEffect(() => {
+    const params = new URLSearchParams(window.location.search);
+    const shouldReset = params.get("reset") === "1";
 
-  setServerTimeOffset(estimatedServerNow - endedAt);
-}
+    if (shouldReset) {
+      localStorage.clear();
 
-useEffect(() => {
-  const timer = setInterval(() => {
-    setTick((value) => value + 1);
-  }, 1000);
+      setRoom(null);
+      setPlayers([]);
+      setCurrentRound(null);
+      setSubmissions([]);
+      setPlayerId("");
+      setOrderedItems([]);
+      setPlayerName("");
+      setJoinCode("");
+      setMessage("");
+      setIsSubmitting(false);
 
-  return () => clearInterval(timer);
-}, []);
+      window.history.replaceState(null, "", window.location.pathname);
+      return;
+    }
 
-useEffect(() => {
-  const timer = setInterval(() => {
     const savedRoomId = localStorage.getItem("roomId");
+    const savedPlayerId = localStorage.getItem("playerId");
+    const savedPlayerName = localStorage.getItem("playerName");
 
-    if (savedRoomId) {
+    if (savedRoomId && savedPlayerId) {
+      setPlayerId(savedPlayerId);
+      setPlayerName(savedPlayerName ?? "");
       fetchRoomState(savedRoomId);
     }
-  }, 10000);
+  }, [fetchRoomState]);
 
-  return () => clearInterval(timer);
-}, [fetchRoomState]);
+  useEffect(() => {
+    const timer = setInterval(() => {
+      setTick((value) => value + 1);
+    }, 1000);
 
-// 4. Supabase Realtime 구독
-useEffect(() => {
-  if (!room?.id) return;
+    return () => clearInterval(timer);
+  }, []);
 
-  const channel = supabase
-    .channel(`room-realtime-${room.id}`)
-    .on(
-      "postgres_changes",
-      {
-        event: "*",
-        schema: "public",
-        table: "rooms",
-        filter: `id=eq.${room.id}`,
-      },
-      () => {
-        fetchRoomState(room.id);
+  useEffect(() => {
+    syncServerTime();
+
+    const timer = setInterval(() => {
+      syncServerTime();
+    }, 30000);
+
+    return () => clearInterval(timer);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
+  useEffect(() => {
+    const timer = setInterval(() => {
+      const savedRoomId = localStorage.getItem("roomId");
+
+      if (savedRoomId) {
+        fetchRoomState(savedRoomId);
       }
-    )
-    .on(
-      "postgres_changes",
-      {
-        event: "*",
-        schema: "public",
-        table: "players",
-        filter: `room_id=eq.${room.id}`,
-      },
-      () => {
-        fetchRoomState(room.id);
-      }
-    )
-    .on(
-      "postgres_changes",
-      {
-        event: "*",
-        schema: "public",
-        table: "rounds",
-        filter: `room_id=eq.${room.id}`,
-      },
-      () => {
-        fetchRoomState(room.id);
-      }
-    )
-    .on(
-      "postgres_changes",
-      {
-        event: "*",
-        schema: "public",
-        table: "submissions",
-        filter: `room_id=eq.${room.id}`,
-      },
-      () => {
-        fetchRoomState(room.id);
-      }
-    )
-    .subscribe((status) => {
-      console.log("Realtime status:", status);
-    });
+    }, 10000);
 
-  return () => {
-    supabase.removeChannel(channel);
-  };
-}, [room?.id, fetchRoomState]);
+    return () => clearInterval(timer);
+  }, [fetchRoomState]);
 
-useEffect(() => {
-  if (!room || !currentRound) return;
-  if (room.status !== "playing") return;
-  if (players.length === 0) return;
+  useEffect(() => {
+    if (!room?.id) return;
 
-  const allSubmitted = submissions.length >= players.length;
-  const timeEnded = remainingSeconds <= 0;
+    const channel = supabase
+      .channel(`room-realtime-${room.id}`)
+      .on(
+        "postgres_changes",
+        {
+          event: "*",
+          schema: "public",
+          table: "rooms",
+          filter: `id=eq.${room.id}`,
+        },
+        () => {
+          fetchRoomState(room.id);
+        }
+      )
+      .on(
+        "postgres_changes",
+        {
+          event: "*",
+          schema: "public",
+          table: "players",
+          filter: `room_id=eq.${room.id}`,
+        },
+        () => {
+          fetchRoomState(room.id);
+        }
+      )
+      .on(
+        "postgres_changes",
+        {
+          event: "*",
+          schema: "public",
+          table: "rounds",
+          filter: `room_id=eq.${room.id}`,
+        },
+        () => {
+          fetchRoomState(room.id);
+        }
+      )
+      .on(
+        "postgres_changes",
+        {
+          event: "*",
+          schema: "public",
+          table: "submissions",
+          filter: `room_id=eq.${room.id}`,
+        },
+        () => {
+          fetchRoomState(room.id);
+        }
+      )
+      .subscribe((status) => {
+        console.log("Realtime status:", status);
+      });
 
-  if ((allSubmitted || timeEnded) && isHost) {
-    revealRoundResult();
-  }
-  // eslint-disable-next-line react-hooks/exhaustive-deps
-}, [
-  room?.status,
-  currentRound?.id,
-  players.length,
-  submissions.length,
-  remainingSeconds,
-  isHost,
-]);
+    return () => {
+      supabase.removeChannel(channel);
+    };
+  }, [room?.id, fetchRoomState]);
+
+  useEffect(() => {
+    if (!room || !currentRound) return;
+    if (room.status !== "playing") return;
+    if (players.length === 0) return;
+
+    const allSubmitted = submissions.length >= players.length;
+    const timeEnded = remainingSeconds <= 0;
+
+    if ((allSubmitted || timeEnded) && isHost) {
+      revealRoundResult();
+    }
+
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [
+    room?.status,
+    currentRound?.id,
+    players.length,
+    submissions.length,
+    remainingSeconds,
+    isHost,
+  ]);
 
   async function createRoom() {
     if (!playerName.trim()) {
@@ -480,6 +605,7 @@ useEffect(() => {
 
     setPlayerId(createdPlayer.id);
     setMessage("방 만들기 성공!");
+
     await fetchRoomState(createdRoom.id);
   }
 
@@ -541,11 +667,13 @@ useEffect(() => {
 
     setPlayerId(joinedPlayer.id);
     setMessage("방 입장 성공!");
+
     await fetchRoomState(foundRoom.id);
   }
 
   async function startGame() {
     if (!room) return;
+
     if (!isHost) {
       setMessage("방장만 게임을 시작할 수 있어.");
       return;
@@ -553,8 +681,9 @@ useEffect(() => {
 
     const roundNumber = 1;
     const question = fallbackQuestions[0];
-    const now = new Date();
-    const endsAt = new Date(Date.now() + 5 * 60 * 1000);
+
+    const now = await getCorrectedServerNow();
+    const endsAt = new Date(now.getTime() + 5 * 60 * 1000);
 
     const { error: roundError } = await supabase.from("rounds").insert({
       room_id: room.id,
@@ -585,6 +714,8 @@ useEffect(() => {
     }
 
     setMessage("");
+    localStorage.removeItem("currentRoundId");
+
     await fetchRoomState(room.id);
   }
 
@@ -638,12 +769,12 @@ useEffect(() => {
 
     setIsSubmitting(false);
     setMessage("제출 완료! 친구들을 기다리는 중...");
+
     await fetchRoomState(room.id);
   }
 
   async function revealRoundResult() {
     if (!room || !currentRound) return;
-
     if (room.status !== "playing") return;
 
     await supabase
@@ -677,8 +808,8 @@ useEffect(() => {
     const nextRoundNumber = room.current_round + 1;
     const question = fallbackQuestions[(nextRoundNumber - 1) % fallbackQuestions.length];
 
-    const now = new Date();
-    const endsAt = new Date(Date.now() + 5 * 60 * 1000);
+    const now = await getCorrectedServerNow();
+    const endsAt = new Date(now.getTime() + 5 * 60 * 1000);
 
     const { error: roundError } = await supabase.from("rounds").insert({
       room_id: room.id,
@@ -712,6 +843,7 @@ useEffect(() => {
     setSubmissions([]);
     setOrderedItems([]);
     localStorage.removeItem("currentRoundId");
+
     await fetchRoomState(room.id);
   }
 
@@ -729,42 +861,18 @@ useEffect(() => {
   }
 
   async function leaveRoom() {
-  if (playerId) {
-    await supabase
-      .from("players")
-      .update({
-        is_online: false,
-      })
-      .eq("id", playerId);
+    if (playerId) {
+      await supabase
+        .from("players")
+        .update({
+          is_online: false,
+        })
+        .eq("id", playerId);
+    }
+
+    forceReset();
   }
 
-  localStorage.clear();
-
-  setRoom(null);
-  setPlayers([]);
-  setCurrentRound(null);
-  setSubmissions([]);
-  setPlayerId("");
-  setOrderedItems([]);
-  setPlayerName("");
-  setJoinCode("");
-  setMessage("");
-}
-function forceReset() {
-  localStorage.clear();
-  location.href = "/";
-}
-
-function ForceResetButton() {
-  return (
-    <button
-      onClick={forceReset}
-      className="fixed right-4 top-4 z-50 rounded-2xl border border-white/10 bg-black/70 px-4 py-3 text-sm font-bold text-white backdrop-blur-xl"
-    >
-      초기화
-    </button>
-  );
-}
   function moveItem(index: number, direction: "up" | "down") {
     const nextItems = [...orderedItems];
     const targetIndex = direction === "up" ? index - 1 : index + 1;
@@ -783,14 +891,13 @@ function ForceResetButton() {
     return (
       <main className="min-h-screen bg-[#080812] text-white flex items-center justify-center p-6">
         <ForceResetButton />
+
         <div className="w-full max-w-md rounded-3xl border border-white/10 bg-white/10 p-6 backdrop-blur-xl">
           <p className="text-sm font-bold tracking-[0.2em] text-cyan-300">
             RANKING PARTY
           </p>
 
-          <h1 className="mt-3 text-4xl font-black">
-            친구랑 랭킹 게임
-          </h1>
+          <h1 className="mt-3 text-4xl font-black">친구랑 랭킹 게임</h1>
 
           <p className="mt-3 text-white/60">
             방을 만들거나 친구가 준 방 코드로 입장합니다.
@@ -841,6 +948,7 @@ function ForceResetButton() {
     return (
       <main className="min-h-screen bg-[#080812] text-white flex items-center justify-center p-6">
         <ForceResetButton />
+
         <div className="w-full max-w-md rounded-3xl border border-white/10 bg-white/10 p-6 backdrop-blur-xl">
           <p className="text-sm font-bold tracking-[0.2em] text-cyan-300">
             WAITING ROOM
@@ -871,13 +979,16 @@ function ForceResetButton() {
                     <p className="font-bold">
                       {index + 1}. {player.name}
                     </p>
+
                     {player.id === playerId && (
                       <p className="text-xs text-cyan-300">나</p>
                     )}
+
                     {player.id === room.host_player_id && (
                       <p className="text-xs text-pink-300">방장</p>
                     )}
                   </div>
+
                   <p className="text-sm text-white/50">{player.score}점</p>
                 </div>
               ))}
@@ -912,15 +1023,18 @@ function ForceResetButton() {
     return (
       <main className="min-h-screen bg-[#080812] text-white flex items-center justify-center p-6">
         <ForceResetButton />
+
         <div className="w-full max-w-xl rounded-3xl border border-white/10 bg-white/10 p-6 backdrop-blur-xl">
           <div className="flex items-start justify-between gap-4">
             <div>
               <p className="text-sm font-bold tracking-[0.2em] text-cyan-300">
                 ROUND {room.current_round} / {room.max_rounds}
               </p>
+
               <h1 className="mt-3 text-3xl font-black">
                 {currentRound.question_json.title}
               </h1>
+
               <p className="mt-2 text-sm text-white/50">
                 {currentRound.question_json.source}
               </p>
@@ -948,16 +1062,16 @@ function ForceResetButton() {
 
                 <button
                   onClick={() => moveItem(index, "up")}
-                  className="rounded-xl bg-white/10 px-3 py-2 text-sm font-bold disabled:opacity-30"
                   disabled={Boolean(mySubmission) || index === 0}
+                  className="rounded-xl bg-white/10 px-3 py-2 text-sm font-bold disabled:opacity-30"
                 >
                   ↑
                 </button>
 
                 <button
                   onClick={() => moveItem(index, "down")}
-                  className="rounded-xl bg-white/10 px-3 py-2 text-sm font-bold disabled:opacity-30"
                   disabled={Boolean(mySubmission) || index === orderedItems.length - 1}
+                  className="rounded-xl bg-white/10 px-3 py-2 text-sm font-bold disabled:opacity-30"
                 >
                   ↓
                 </button>
@@ -1027,6 +1141,7 @@ function ForceResetButton() {
     return (
       <main className="min-h-screen bg-[#080812] text-white flex items-center justify-center p-6">
         <ForceResetButton />
+
         <div className="w-full max-w-xl rounded-3xl border border-white/10 bg-white/10 p-6 backdrop-blur-xl">
           <p className="text-sm font-bold tracking-[0.2em] text-cyan-300">
             ROUND RESULT
@@ -1046,6 +1161,7 @@ function ForceResetButton() {
                   <p className="text-xl font-black">
                     {index + 1}. {submission.playerName}
                   </p>
+
                   <p className="text-2xl font-black text-cyan-300">
                     +{submission.score_gain}
                   </p>
@@ -1071,6 +1187,7 @@ function ForceResetButton() {
                   <span>
                     {index + 1}. {player.name}
                   </span>
+
                   <span className="font-black text-cyan-300">
                     {player.score}점
                   </span>
@@ -1095,15 +1212,6 @@ function ForceResetButton() {
               {message}
             </p>
           )}
-          <button
-  onClick={() => {
-    localStorage.clear();
-    location.reload();
-  }}
-  className="mt-3 w-full rounded-2xl border border-white/10 bg-white/5 px-5 py-4 font-bold text-white"
->
-  저장된 방 정보 초기화
-</button>
         </div>
       </main>
     );
@@ -1113,6 +1221,7 @@ function ForceResetButton() {
     return (
       <main className="min-h-screen bg-[#080812] text-white flex items-center justify-center p-6">
         <ForceResetButton />
+
         <div className="w-full max-w-xl rounded-3xl border border-white/10 bg-white/10 p-6 text-center backdrop-blur-xl">
           <p className="text-sm font-bold tracking-[0.2em] text-cyan-300">
             FINAL RESULT
@@ -1135,6 +1244,7 @@ function ForceResetButton() {
                     {index === 0 ? "👑 " : ""}
                     {index + 1}. {player.name}
                   </p>
+
                   <p className="text-2xl font-black text-cyan-300">
                     {player.score}점
                   </p>
