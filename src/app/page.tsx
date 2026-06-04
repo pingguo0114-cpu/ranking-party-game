@@ -265,7 +265,7 @@ if (!roundData) {
     }
   }, []);
 
-  useEffect(() => {
+useEffect(() => {
   const params = new URLSearchParams(window.location.search);
   const shouldReset = params.get("reset") === "1";
 
@@ -297,6 +297,27 @@ if (!roundData) {
   }
 }, [fetchRoomState]);
 
+useEffect(() => {
+  const timer = setInterval(() => {
+    setTick((value) => value + 1);
+  }, 1000);
+
+  return () => clearInterval(timer);
+}, []);
+
+useEffect(() => {
+  const timer = setInterval(() => {
+    const savedRoomId = localStorage.getItem("roomId");
+
+    if (savedRoomId) {
+      fetchRoomState(savedRoomId);
+    }
+  }, 10000);
+
+  return () => clearInterval(timer);
+}, [fetchRoomState]);
+
+// 4. Supabase Realtime 구독
 useEffect(() => {
   if (!room?.id) return;
 
