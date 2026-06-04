@@ -223,16 +223,20 @@ export default function Home() {
 
     if (typedRoom.current_round > 0) {
       const { data: roundData, error: roundError } = await supabase
-        .from("rounds")
-        .select("*")
-        .eq("room_id", targetRoomId)
-        .eq("round_number", typedRoom.current_round)
-        .single();
+  .from("rounds")
+  .select("*")
+  .eq("room_id", targetRoomId)
+  .eq("round_number", typedRoom.current_round)
+  .maybeSingle();
 
-      if (roundError || !roundData) {
-        console.error("Round fetch error:", roundError);
-        return;
-      }
+      if (roundError) {
+  console.error("Round fetch error:", roundError);
+  return;
+}
+
+if (!roundData) {
+  return;
+}
 
       const typedRound = roundData as GameRound;
       setCurrentRound(typedRound);
@@ -260,18 +264,6 @@ export default function Home() {
       setSubmissions([]);
     }
   }, []);
-
-  useEffect(() => {
-    const savedRoomId = localStorage.getItem("roomId");
-    const savedPlayerId = localStorage.getItem("playerId");
-    const savedPlayerName = localStorage.getItem("playerName");
-
-    if (savedRoomId && savedPlayerId) {
-      setPlayerId(savedPlayerId);
-      setPlayerName(savedPlayerName ?? "");
-      fetchRoomState(savedRoomId);
-    }
-  }, [fetchRoomState]);
 
   useEffect(() => {
   const params = new URLSearchParams(window.location.search);
@@ -305,19 +297,88 @@ export default function Home() {
   }
 }, [fetchRoomState]);
 
-  useEffect(() => {
-    if (!room || !currentRound) return;
-    if (room.status !== "playing") return;
-    if (players.length === 0) return;
+useEffect(() => {
+  if (!room?.id) return;
 
-    const allSubmitted = submissions.length >= players.length;
-    const timeEnded = remainingSeconds <= 0;
+  const channel = supabase
+    .channel(`room-realtime-${room.id}`)
+    .on(
+      "postgres_changes",
+      {
+        event: "*",
+        schema: "public",
+        table: "rooms",
+        filter: `id=eq.${room.id}`,
+      },
+      () => {
+        fetchRoomState(room.id);
+      }
+    )
+    .on(
+      "postgres_changes",
+      {
+        event: "*",
+        schema: "public",
+        table: "players",
+        filter: `room_id=eq.${room.id}`,
+      },
+      () => {
+        fetchRoomState(room.id);
+      }
+    )
+    .on(
+      "postgres_changes",
+      {
+        event: "*",
+        schema: "public",
+        table: "rounds",
+        filter: `room_id=eq.${room.id}`,
+      },
+      () => {
+        fetchRoomState(room.id);
+      }
+    )
+    .on(
+      "postgres_changes",
+      {
+        event: "*",
+        schema: "public",
+        table: "submissions",
+        filter: `room_id=eq.${room.id}`,
+      },
+      () => {
+        fetchRoomState(room.id);
+      }
+    )
+    .subscribe((status) => {
+      console.log("Realtime status:", status);
+    });
 
-    if (allSubmitted || timeEnded) {
-      revealRoundResult();
-    }
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [room?.status, currentRound?.id, players.length, submissions.length, remainingSeconds]);
+  return () => {
+    supabase.removeChannel(channel);
+  };
+}, [room?.id, fetchRoomState]);
+
+useEffect(() => {
+  if (!room || !currentRound) return;
+  if (room.status !== "playing") return;
+  if (players.length === 0) return;
+
+  const allSubmitted = submissions.length >= players.length;
+  const timeEnded = remainingSeconds <= 0;
+
+  if ((allSubmitted || timeEnded) && isHost) {
+    revealRoundResult();
+  }
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+}, [
+  room?.status,
+  currentRound?.id,
+  players.length,
+  submissions.length,
+  remainingSeconds,
+  isHost,
+]);
 
   async function createRoom() {
     if (!playerName.trim()) {
