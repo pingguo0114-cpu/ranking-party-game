@@ -2,6 +2,22 @@
 
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { supabase } from "@/lib/supabase";
+import {
+  DndContext,
+  PointerSensor,
+  TouchSensor,
+  closestCenter,
+  useSensor,
+  useSensors,
+  type DragEndEvent,
+} from "@dnd-kit/core";
+import {
+  SortableContext,
+  arrayMove,
+  useSortable,
+  verticalListSortingStrategy,
+} from "@dnd-kit/sortable";
+import { CSS } from "@dnd-kit/utilities";
 
 type RoomStatus = "waiting" | "playing" | "result" | "finished";
 type RoundStatus = "playing" | "result" | "done";
@@ -120,7 +136,13 @@ const fallbackQuestions: Question[] = [
   {
     title: "카톡 답장이 늦어지는 이유 Top 5",
     source: "샘플 설문 데이터",
-    answer: ["바빠서", "뭐라고 답할지 몰라서", "귀찮아서", "알림을 못 봐서", "일부러 시간을 두려고"],
+    answer: [
+      "바빠서",
+      "뭐라고 답할지 몰라서",
+      "귀찮아서",
+      "알림을 못 봐서",
+      "일부러 시간을 두려고",
+    ],
   },
   {
     title: "노래방에서 자주 부르는 장르 Top 5",
@@ -147,6 +169,36 @@ function shuffle<T>(array: T[]) {
   }
 
   return copied;
+}
+
+async function getRandomUnusedQuestion(roomId: string) {
+  const { data: rounds, error } = await supabase
+    .from("rounds")
+    .select("question_json")
+    .eq("room_id", roomId);
+
+  if (error) {
+    console.warn("Question history fetch failed:", error);
+    return fallbackQuestions[Math.floor(Math.random() * fallbackQuestions.length)];
+  }
+
+  const usedTitles = new Set(
+    (rounds ?? [])
+      .map((round) => {
+        const question = round.question_json as Question;
+        return question.title;
+      })
+      .filter(Boolean)
+  );
+
+  const unusedQuestions = fallbackQuestions.filter(
+    (question) => !usedTitles.has(question.title)
+  );
+
+  const pool = unusedQuestions.length > 0 ? unusedQuestions : fallbackQuestions;
+  const randomIndex = Math.floor(Math.random() * pool.length);
+
+  return pool[randomIndex];
 }
 
 function getDrinkPenalty(weightedError: number) {
@@ -190,6 +242,55 @@ function formatTime(seconds: number) {
   return `${String(min).padStart(2, "0")}:${String(sec).padStart(2, "0")}`;
 }
 
+type SortableRankingItemProps = {
+  item: string;
+  index: number;
+  disabled: boolean;
+};
+
+function SortableRankingItem({ item, index, disabled }: SortableRankingItemProps) {
+  const {
+    attributes,
+    listeners,
+    setNodeRef,
+    transform,
+    transition,
+    isDragging,
+  } = useSortable({
+    id: item,
+    disabled,
+  });
+
+  const style = {
+    transform: CSS.Transform.toString(transform),
+    transition,
+  };
+
+  return (
+    <div
+      ref={setNodeRef}
+      style={style}
+      {...attributes}
+      {...listeners}
+      className={`flex touch-none items-center gap-3 rounded-2xl border p-3 transition ${
+        isDragging
+          ? "z-50 scale-[1.03] border-pink-300/60 bg-pink-300/20 shadow-[0_0_30px_rgba(255,43,214,.45)]"
+          : "border-white/10 bg-black/30"
+      }`}
+    >
+      <div className="grid h-10 w-10 place-items-center rounded-xl bg-cyan-300/10 font-black text-cyan-300">
+        {index + 1}
+      </div>
+
+      <p className="flex-1 font-black">{item}</p>
+
+      <div className="rounded-xl bg-white/10 px-3 py-2 text-sm font-bold text-white/60">
+        드래그
+      </div>
+    </div>
+  );
+}
+
 export default function Home() {
   const [playerName, setPlayerName] = useState("");
   const [joinCode, setJoinCode] = useState("");
@@ -206,6 +307,16 @@ export default function Home() {
 
   const [tick, setTick] = useState(0);
   const [serverTimeOffset, setServerTimeOffset] = useState(0);
+
+  const sensors = useSensors(
+    useSensor(PointerSensor),
+    useSensor(TouchSensor, {
+      activationConstraint: {
+        delay: 120,
+        tolerance: 8,
+      },
+    })
+  );
 
   const isHost = room?.host_player_id === playerId;
 
@@ -227,42 +338,43 @@ export default function Home() {
   }, [players]);
 
   const fetchRoomState = useCallback(async (targetRoomId: string) => {
-const { data: roomData, error: roomError } = await supabase
-  .from("rooms")
-  .select("*")
-  .eq("id", targetRoomId)
-  .maybeSingle();
+    const { data: roomData, error: roomError } = await supabase
+      .from("rooms")
+      .select("*")
+      .eq("id", targetRoomId)
+      .maybeSingle();
 
-if (roomError) {
-  console.warn("Room fetch failed:", {
-    message: roomError.message,
-    details: roomError.details,
-    hint: roomError.hint,
-    code: roomError.code,
-    raw: roomError,
-  });
+    if (roomError) {
+      console.warn("Room fetch failed:", {
+        message: roomError.message,
+        details: roomError.details,
+        hint: roomError.hint,
+        code: roomError.code,
+        raw: roomError,
+      });
 
-  setMessage("방 정보를 불러오지 못했어. 다시 처음부터 시작해줘.");
-  return;
-}
+      setMessage("방 정보를 불러오지 못했어. 다시 처음부터 시작해줘.");
+      return;
+    }
 
-if (!roomData) {
-  console.warn("Saved room does not exist anymore. Resetting local state.");
+    if (!roomData) {
+      console.warn("Saved room does not exist anymore. Resetting local state.");
 
-  localStorage.clear();
+      localStorage.clear();
 
-  setRoom(null);
-  setPlayers([]);
-  setCurrentRound(null);
-  setSubmissions([]);
-  setPlayerId("");
-  setOrderedItems([]);
-  setPlayerName("");
-  setJoinCode("");
-  setMessage("이전 방 정보를 찾을 수 없어서 초기화했어. 새 방을 만들어줘.");
+      setRoom(null);
+      setPlayers([]);
+      setCurrentRound(null);
+      setSubmissions([]);
+      setPlayerId("");
+      setOrderedItems([]);
+      setPlayerName("");
+      setJoinCode("");
+      setMessage("이전 방 정보를 찾을 수 없어서 초기화했어. 새 방을 만들어줘.");
+      setIsSubmitting(false);
 
-  return;
-}
+      return;
+    }
 
     const typedRoom = roomData as Room;
     setRoom(typedRoom);
@@ -274,7 +386,7 @@ if (!roomData) {
       .order("joined_at", { ascending: true });
 
     if (playerError) {
-      console.error("Players fetch error:", playerError);
+      console.warn("Players fetch failed:", playerError);
       return;
     }
 
@@ -289,7 +401,7 @@ if (!roomData) {
         .maybeSingle();
 
       if (roundError) {
-        console.error("Round fetch error:", roundError);
+        console.warn("Round fetch failed:", roundError);
         return;
       }
 
@@ -306,7 +418,7 @@ if (!roomData) {
         .eq("round_id", typedRound.id);
 
       if (submissionError) {
-        console.error("Submissions fetch error:", submissionError);
+        console.warn("Submissions fetch failed:", submissionError);
         return;
       }
 
@@ -326,29 +438,29 @@ if (!roomData) {
     }
   }, []);
 
-async function syncServerTime() {
-  const startedAt = Date.now();
+  async function syncServerTime() {
+    const startedAt = Date.now();
 
-  const { data, error } = await supabase.rpc("get_server_time");
+    const { data, error } = await supabase.rpc("get_server_time");
 
-  const endedAt = Date.now();
+    const endedAt = Date.now();
 
-  if (error || !data) {
-    console.warn("Server time sync failed:", {
-      message: error?.message,
-      details: error?.details,
-      hint: error?.hint,
-      code: error?.code,
-      raw: error,
-    });
-    return;
+    if (error || !data) {
+      console.warn("Server time sync failed:", {
+        message: error?.message,
+        details: error?.details,
+        hint: error?.hint,
+        code: error?.code,
+        raw: error,
+      });
+      return;
+    }
+
+    const roundTripMs = endedAt - startedAt;
+    const estimatedServerNow = new Date(data).getTime() + roundTripMs / 2;
+
+    setServerTimeOffset(estimatedServerNow - endedAt);
   }
-
-  const roundTripMs = endedAt - startedAt;
-  const estimatedServerNow = new Date(data).getTime() + roundTripMs / 2;
-
-  setServerTimeOffset(estimatedServerNow - endedAt);
-}
 
   async function getCorrectedServerNow() {
     const startedAt = Date.now();
@@ -358,7 +470,14 @@ async function syncServerTime() {
     const endedAt = Date.now();
 
     if (error || !data) {
-      console.error("Server time fetch error:", error);
+      console.warn("Server time fetch failed:", {
+        message: error?.message,
+        details: error?.details,
+        hint: error?.hint,
+        code: error?.code,
+        raw: error,
+      });
+
       return new Date(Date.now() + serverTimeOffset);
     }
 
@@ -680,7 +799,7 @@ async function syncServerTime() {
     }
 
     const roundNumber = 1;
-    const question = fallbackQuestions[0];
+    const question = await getRandomUnusedQuestion(room.id);
 
     const now = await getCorrectedServerNow();
     const endsAt = new Date(now.getTime() + 5 * 60 * 1000);
@@ -806,7 +925,7 @@ async function syncServerTime() {
     }
 
     const nextRoundNumber = room.current_round + 1;
-    const question = fallbackQuestions[(nextRoundNumber - 1) % fallbackQuestions.length];
+    const question = await getRandomUnusedQuestion(room.id);
 
     const now = await getCorrectedServerNow();
     const endsAt = new Date(now.getTime() + 5 * 60 * 1000);
@@ -873,18 +992,20 @@ async function syncServerTime() {
     forceReset();
   }
 
-  function moveItem(index: number, direction: "up" | "down") {
-    const nextItems = [...orderedItems];
-    const targetIndex = direction === "up" ? index - 1 : index + 1;
+  function handleDragEnd(event: DragEndEvent) {
+    const { active, over } = event;
 
-    if (targetIndex < 0 || targetIndex >= nextItems.length) return;
+    if (!over) return;
+    if (active.id === over.id) return;
 
-    [nextItems[index], nextItems[targetIndex]] = [
-      nextItems[targetIndex],
-      nextItems[index],
-    ];
+    setOrderedItems((items) => {
+      const oldIndex = items.indexOf(String(active.id));
+      const newIndex = items.indexOf(String(over.id));
 
-    setOrderedItems(nextItems);
+      if (oldIndex === -1 || newIndex === -1) return items;
+
+      return arrayMove(items, oldIndex, newIndex);
+    });
   }
 
   if (!room) {
@@ -1048,36 +1169,27 @@ async function syncServerTime() {
             </div>
           </div>
 
-          <div className="mt-6 space-y-3">
-            {orderedItems.map((item, index) => (
-              <div
-                key={item}
-                className="flex items-center gap-3 rounded-2xl border border-white/10 bg-black/30 p-3"
-              >
-                <div className="grid h-10 w-10 place-items-center rounded-xl bg-cyan-300/10 font-black text-cyan-300">
-                  {index + 1}
-                </div>
-
-                <p className="flex-1 font-black">{item}</p>
-
-                <button
-                  onClick={() => moveItem(index, "up")}
-                  disabled={Boolean(mySubmission) || index === 0}
-                  className="rounded-xl bg-white/10 px-3 py-2 text-sm font-bold disabled:opacity-30"
-                >
-                  ↑
-                </button>
-
-                <button
-                  onClick={() => moveItem(index, "down")}
-                  disabled={Boolean(mySubmission) || index === orderedItems.length - 1}
-                  className="rounded-xl bg-white/10 px-3 py-2 text-sm font-bold disabled:opacity-30"
-                >
-                  ↓
-                </button>
+          <DndContext
+            sensors={sensors}
+            collisionDetection={closestCenter}
+            onDragEnd={handleDragEnd}
+          >
+            <SortableContext
+              items={orderedItems}
+              strategy={verticalListSortingStrategy}
+            >
+              <div className="mt-6 space-y-3">
+                {orderedItems.map((item, index) => (
+                  <SortableRankingItem
+                    key={item}
+                    item={item}
+                    index={index}
+                    disabled={Boolean(mySubmission)}
+                  />
+                ))}
               </div>
-            ))}
-          </div>
+            </SortableContext>
+          </DndContext>
 
           <button
             onClick={submitRanking}
@@ -1138,6 +1250,18 @@ async function syncServerTime() {
       })
       .sort((a, b) => b.score_gain - a.score_gain);
 
+    const penaltyTarget = [...roundSubmissions].sort((a, b) => {
+      if (a.score_gain !== b.score_gain) {
+        return a.score_gain - b.score_gain;
+      }
+
+      if (a.total_error !== b.total_error) {
+        return b.total_error - a.total_error;
+      }
+
+      return new Date(b.submitted_at).getTime() - new Date(a.submitted_at).getTime();
+    })[0];
+
     return (
       <main className="min-h-screen bg-[#080812] text-white flex items-center justify-center p-6">
         <ForceResetButton />
@@ -1151,11 +1275,35 @@ async function syncServerTime() {
             {room.current_round}라운드 결과
           </h1>
 
+          {penaltyTarget && (
+            <div className="relative mt-6 overflow-hidden rounded-3xl border border-pink-300/40 bg-pink-500/15 p-6 text-center shadow-[0_0_45px_rgba(255,43,214,.35)]">
+              <div className="absolute left-1/2 top-1/2 h-28 w-28 -translate-x-1/2 -translate-y-1/2 rounded-full bg-pink-400/20 animate-ping" />
+
+              <div className="relative">
+                <p className="text-sm font-black tracking-[0.25em] text-pink-200">
+                  💥 벌칙 당첨 💥
+                </p>
+
+                <p className="mt-3 text-5xl font-black text-white">
+                  {penaltyTarget.playerName}
+                </p>
+
+                <p className="mt-3 text-3xl font-black text-pink-300">
+                  벌칙주 한 잔
+                </p>
+              </div>
+            </div>
+          )}
+
           <div className="mt-6 space-y-3">
             {roundSubmissions.map((submission, index) => (
               <div
                 key={submission.id}
-                className="rounded-2xl border border-white/10 bg-black/30 p-4"
+                className={`rounded-2xl border p-4 ${
+                  penaltyTarget?.player_id === submission.player_id
+                    ? "border-pink-300/40 bg-pink-400/10"
+                    : "border-white/10 bg-black/30"
+                }`}
               >
                 <div className="flex items-center justify-between">
                   <p className="text-xl font-black">
@@ -1169,8 +1317,14 @@ async function syncServerTime() {
 
                 <p className="mt-2 text-sm text-white/60">
                   오차 {submission.total_error} · 가중 오차{" "}
-                  {submission.weighted_error} · 벌칙 {submission.drink_penalty}
+                  {submission.weighted_error}
                 </p>
+
+                {penaltyTarget?.player_id === submission.player_id && (
+                  <p className="mt-2 inline-flex rounded-full bg-pink-400/20 px-3 py-1 text-sm font-black text-pink-200">
+                    벌칙주 한 잔
+                  </p>
+                )}
               </div>
             ))}
           </div>
