@@ -187,7 +187,7 @@ export default function Home() {
     const endTime = new Date(currentRound.ends_at).getTime();
     const now = Date.now();
     return Math.max(0, Math.ceil((endTime - now) / 1000));
-  }, [currentRound?.ends_at, tick]);
+  }, [currentRound?.ends_at, tick]); const [serverTimeOffset, setServerTimeOffset] = useState(0);
 
   const sortedPlayers = useMemo(() => {
     return [...players].sort((a, b) => b.score - a.score);
@@ -296,6 +296,24 @@ useEffect(() => {
     fetchRoomState(savedRoomId);
   }
 }, [fetchRoomState]);
+
+async function syncServerTime() {
+  const startedAt = Date.now();
+
+  const { data, error } = await supabase.rpc("get_server_time");
+
+  const endedAt = Date.now();
+
+  if (error || !data) {
+    console.error("Server time sync error:", error);
+    return;
+  }
+
+  const roundTripMs = endedAt - startedAt;
+  const estimatedServerNow = new Date(data).getTime() + roundTripMs / 2;
+
+  setServerTimeOffset(estimatedServerNow - endedAt);
+}
 
 useEffect(() => {
   const timer = setInterval(() => {
