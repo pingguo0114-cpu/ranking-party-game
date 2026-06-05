@@ -21,6 +21,8 @@ import { CSS } from "@dnd-kit/utilities";
 
 type RoomStatus = "waiting" | "playing" | "result" | "finished";
 type RoundStatus = "playing" | "result" | "done";
+type QuestionCategory = "all" | "food" | "dating" | "work" | "friends";
+type SourceType = "sample" | "real";
 
 type Room = {
   id: string;
@@ -30,6 +32,7 @@ type Room = {
   current_round: number;
   max_rounds: number;
   difficulty: number;
+  selected_category: QuestionCategory;
   created_at: string;
 };
 
@@ -43,8 +46,11 @@ type Player = {
 };
 
 type Question = {
+  id: string;
+  category: Exclude<QuestionCategory, "all">;
   title: string;
   source: string;
+  sourceType: SourceType;
   answer: string[];
 };
 
@@ -73,48 +79,69 @@ type Submission = {
   submitted_at: string;
 };
 
+const categoryOptions: {
+  value: QuestionCategory;
+  label: string;
+  description: string;
+}[] = [
+  {
+    value: "all",
+    label: "전체 랜덤",
+    description: "모든 주제에서 랜덤",
+  },
+  {
+    value: "food",
+    label: "음식/취향",
+    description: "야식, 배달, 스트레스 음식",
+  },
+  {
+    value: "dating",
+    label: "연애/관계",
+    description: "소개팅, 호감, 연락",
+  },
+  {
+    value: "work",
+    label: "직장/사회생활",
+    description: "동료, 회사, 사회생활",
+  },
+  {
+    value: "friends",
+    label: "술자리/친구",
+    description: "친구, 술자리, 노래방",
+  },
+];
+
 const fallbackQuestions: Question[] = [
   {
+    id: "food_night_01",
+    category: "food",
     title: "한국인이 좋아하는 야식 Top 5",
-    source: "샘플 설문 데이터",
+    source: "게임용 샘플 랭킹",
+    sourceType: "sample",
     answer: ["치킨", "라면", "족발/보쌈", "떡볶이", "피자"],
   },
   {
-    title: "술자리에서 분위기 깨는 행동 Top 5",
-    source: "샘플 설문 데이터",
-    answer: [
-      "계속 휴대폰만 보기",
-      "술 강요하기",
-      "혼자 진지한 얘기만 하기",
-      "계산할 때 사라지기",
-      "같은 말 반복하기",
-    ],
+    id: "food_delivery_01",
+    category: "food",
+    title: "한국인이 선호하는 배달음식 Top 5",
+    source: "게임용 샘플 랭킹",
+    sourceType: "sample",
+    answer: ["치킨", "중식", "피자", "분식", "족발/보쌈"],
   },
   {
-    title: "직장인이 뽑은 꼴불견 동료 Top 5",
-    source: "샘플 설문 데이터",
-    answer: [
-      "남 탓하는 사람",
-      "말만 하고 일 안 하는 사람",
-      "지각이 잦은 사람",
-      "뒷담화하는 사람",
-      "공을 가로채는 사람",
-    ],
+    id: "food_stress_01",
+    category: "food",
+    title: "스트레스 받을 때 먹고 싶은 음식 Top 5",
+    source: "게임용 샘플 랭킹",
+    sourceType: "sample",
+    answer: ["매운 음식", "치킨", "떡볶이", "디저트", "라면"],
   },
   {
-    title: "친구에게 가장 서운한 순간 Top 5",
-    source: "샘플 설문 데이터",
-    answer: [
-      "약속을 쉽게 취소할 때",
-      "내 얘기를 안 들을 때",
-      "연락을 일부러 늦게 볼 때",
-      "돈 문제로 애매하게 굴 때",
-      "비밀을 말했을 때",
-    ],
-  },
-  {
+    id: "dating_blind_date_01",
+    category: "dating",
     title: "소개팅에서 호감 떨어지는 행동 Top 5",
-    source: "샘플 설문 데이터",
+    source: "게임용 샘플 랭킹",
+    sourceType: "sample",
     answer: [
       "무례한 말투",
       "계속 휴대폰 보기",
@@ -124,18 +151,11 @@ const fallbackQuestions: Question[] = [
     ],
   },
   {
-    title: "한국인이 선호하는 배달음식 Top 5",
-    source: "샘플 설문 데이터",
-    answer: ["치킨", "중식", "피자", "분식", "족발/보쌈"],
-  },
-  {
-    title: "여행 가서 가장 먼저 하는 일 Top 5",
-    source: "샘플 설문 데이터",
-    answer: ["숙소 체크인", "맛집 찾기", "사진 찍기", "카페 가기", "기념품 구경"],
-  },
-  {
+    id: "dating_reply_01",
+    category: "dating",
     title: "카톡 답장이 늦어지는 이유 Top 5",
-    source: "샘플 설문 데이터",
+    source: "게임용 샘플 랭킹",
+    sourceType: "sample",
     answer: [
       "바빠서",
       "뭐라고 답할지 몰라서",
@@ -145,14 +165,62 @@ const fallbackQuestions: Question[] = [
     ],
   },
   {
+    id: "work_coworker_01",
+    category: "work",
+    title: "직장인이 뽑은 꼴불견 동료 Top 5",
+    source: "게임용 샘플 랭킹",
+    sourceType: "sample",
+    answer: [
+      "남 탓하는 사람",
+      "말만 하고 일 안 하는 사람",
+      "지각이 잦은 사람",
+      "뒷담화하는 사람",
+      "공을 가로채는 사람",
+    ],
+  },
+  {
+    id: "friends_drinking_01",
+    category: "friends",
+    title: "술자리에서 분위기 깨는 행동 Top 5",
+    source: "게임용 샘플 랭킹",
+    sourceType: "sample",
+    answer: [
+      "계속 휴대폰만 보기",
+      "술 강요하기",
+      "혼자 진지한 얘기만 하기",
+      "계산할 때 사라지기",
+      "같은 말 반복하기",
+    ],
+  },
+  {
+    id: "friends_hurt_01",
+    category: "friends",
+    title: "친구에게 가장 서운한 순간 Top 5",
+    source: "게임용 샘플 랭킹",
+    sourceType: "sample",
+    answer: [
+      "약속을 쉽게 취소할 때",
+      "내 얘기를 안 들을 때",
+      "연락을 일부러 늦게 볼 때",
+      "돈 문제로 애매하게 굴 때",
+      "비밀을 말했을 때",
+    ],
+  },
+  {
+    id: "friends_karaoke_01",
+    category: "friends",
     title: "노래방에서 자주 부르는 장르 Top 5",
-    source: "샘플 설문 데이터",
+    source: "게임용 샘플 랭킹",
+    sourceType: "sample",
     answer: ["발라드", "댄스곡", "아이돌 노래", "힙합", "트로트"],
   },
   {
-    title: "스트레스 받을 때 먹고 싶은 음식 Top 5",
-    source: "샘플 설문 데이터",
-    answer: ["매운 음식", "치킨", "떡볶이", "디저트", "라면"],
+    id: "food_travel_01",
+    category: "food",
+    title: "여행 가서 가장 먼저 하는 일 Top 5",
+    source: "게임용 샘플 랭킹",
+    sourceType: "sample",
+    answer: ["숙소 체크인", "맛집 찾기", "사진 찍기", "카페 가기", "기념품 구경"],
   },
 ];
 
@@ -171,7 +239,19 @@ function shuffle<T>(array: T[]) {
   return copied;
 }
 
-async function getRandomUnusedQuestion(roomId: string) {
+function getCategoryLabel(category: QuestionCategory) {
+  return categoryOptions.find((option) => option.value === category)?.label ?? "전체 랜덤";
+}
+
+function getQuestionPool(category: QuestionCategory) {
+  if (category === "all") return fallbackQuestions;
+  return fallbackQuestions.filter((question) => question.category === category);
+}
+
+async function getRandomUnusedQuestion(roomId: string, category: QuestionCategory) {
+  const basePool = getQuestionPool(category);
+  const safeBasePool = basePool.length > 0 ? basePool : fallbackQuestions;
+
   const { data: rounds, error } = await supabase
     .from("rounds")
     .select("question_json")
@@ -179,23 +259,23 @@ async function getRandomUnusedQuestion(roomId: string) {
 
   if (error) {
     console.warn("Question history fetch failed:", error);
-    return fallbackQuestions[Math.floor(Math.random() * fallbackQuestions.length)];
+    return safeBasePool[Math.floor(Math.random() * safeBasePool.length)];
   }
 
-  const usedTitles = new Set(
+  const usedIds = new Set(
     (rounds ?? [])
       .map((round) => {
         const question = round.question_json as Question;
-        return question.title;
+        return question.id;
       })
       .filter(Boolean)
   );
 
-  const unusedQuestions = fallbackQuestions.filter(
-    (question) => !usedTitles.has(question.title)
+  const unusedQuestions = safeBasePool.filter(
+    (question) => !usedIds.has(question.id)
   );
 
-  const pool = unusedQuestions.length > 0 ? unusedQuestions : fallbackQuestions;
+  const pool = unusedQuestions.length > 0 ? unusedQuestions : safeBasePool;
   const randomIndex = Math.floor(Math.random() * pool.length);
 
   return pool[randomIndex];
@@ -295,6 +375,7 @@ export default function Home() {
   const [playerName, setPlayerName] = useState("");
   const [joinCode, setJoinCode] = useState("");
   const [message, setMessage] = useState("");
+  const [selectedCategory, setSelectedCategory] = useState<QuestionCategory>("all");
 
   const [room, setRoom] = useState<Room | null>(null);
   const [players, setPlayers] = useState<Player[]>([]);
@@ -378,6 +459,7 @@ export default function Home() {
 
     const typedRoom = roomData as Room;
     setRoom(typedRoom);
+    setSelectedCategory(typedRoom.selected_category ?? "all");
 
     const { data: playerData, error: playerError } = await supabase
       .from("players")
@@ -513,6 +595,26 @@ export default function Home() {
         초기화
       </button>
     );
+  }
+
+  async function updateRoomCategory(nextCategory: QuestionCategory) {
+    setSelectedCategory(nextCategory);
+
+    if (!room || !isHost || room.status !== "waiting") return;
+
+    const { error } = await supabase
+      .from("rooms")
+      .update({
+        selected_category: nextCategory,
+      })
+      .eq("id", room.id);
+
+    if (error) {
+      setMessage(`카테고리 변경 실패: ${error.message}`);
+      return;
+    }
+
+    await fetchRoomState(room.id);
   }
 
   useEffect(() => {
@@ -681,6 +783,7 @@ export default function Home() {
         current_round: 0,
         max_rounds: 10,
         difficulty: 1,
+        selected_category: selectedCategory,
       })
       .select()
       .single();
@@ -799,7 +902,7 @@ export default function Home() {
     }
 
     const roundNumber = 1;
-    const question = await getRandomUnusedQuestion(room.id);
+    const question = await getRandomUnusedQuestion(room.id, room.selected_category ?? "all");
 
     const now = await getCorrectedServerNow();
     const endsAt = new Date(now.getTime() + 5 * 60 * 1000);
@@ -925,7 +1028,7 @@ export default function Home() {
     }
 
     const nextRoundNumber = room.current_round + 1;
-    const question = await getRandomUnusedQuestion(room.id);
+    const question = await getRandomUnusedQuestion(room.id, room.selected_category ?? "all");
 
     const now = await getCorrectedServerNow();
     const endsAt = new Date(now.getTime() + 5 * 60 * 1000);
@@ -1008,6 +1111,50 @@ export default function Home() {
     });
   }
 
+  function CategorySelector({ disabled = false }: { disabled?: boolean }) {
+    return (
+      <div className="mt-5 rounded-2xl border border-white/10 bg-black/25 p-4">
+        <div className="flex items-center justify-between gap-3">
+          <div>
+            <p className="font-black">카테고리</p>
+            <p className="mt-1 text-xs text-white/50">
+              {disabled ? "방장이 선택한 주제로 진행돼요" : "이번 게임의 문제 범위를 고르세요"}
+            </p>
+          </div>
+
+          {room && (
+            <p className="rounded-full bg-cyan-300/10 px-3 py-1 text-xs font-black text-cyan-200">
+              {getCategoryLabel(room.selected_category ?? "all")}
+            </p>
+          )}
+        </div>
+
+        <div className="mt-4 grid grid-cols-1 gap-2">
+          {categoryOptions.map((option) => {
+            const active = selectedCategory === option.value;
+
+            return (
+              <button
+                key={option.value}
+                type="button"
+                disabled={disabled}
+                onClick={() => updateRoomCategory(option.value)}
+                className={`rounded-2xl border px-4 py-3 text-left transition ${
+                  active
+                    ? "border-cyan-300/60 bg-cyan-300/15"
+                    : "border-white/10 bg-white/5"
+                } ${disabled ? "cursor-not-allowed opacity-70" : "hover:bg-white/10"}`}
+              >
+                <p className="font-black">{option.label}</p>
+                <p className="mt-1 text-xs text-white/50">{option.description}</p>
+              </button>
+            );
+          })}
+        </div>
+      </div>
+    );
+  }
+
   if (!room) {
     return (
       <main className="min-h-screen bg-[#080812] text-white flex items-center justify-center p-6">
@@ -1030,6 +1177,8 @@ export default function Home() {
             placeholder="내 이름"
             className="mt-6 w-full rounded-2xl border border-white/10 bg-black/30 px-4 py-4 text-white outline-none focus:border-cyan-300"
           />
+
+          <CategorySelector />
 
           <button
             onClick={createRoom}
@@ -1083,6 +1232,8 @@ export default function Home() {
               {room.code}
             </p>
           </div>
+
+          <CategorySelector disabled={!isHost} />
 
           <div className="mt-5 rounded-2xl border border-white/10 bg-black/30 p-4">
             <div className="flex items-center justify-between">
@@ -1157,6 +1308,7 @@ export default function Home() {
               </h1>
 
               <p className="mt-2 text-sm text-white/50">
+                {getCategoryLabel(currentRound.question_json.category)} ·{" "}
                 {currentRound.question_json.source}
               </p>
             </div>
@@ -1262,6 +1414,11 @@ export default function Home() {
       return new Date(b.submitted_at).getTime() - new Date(a.submitted_at).getTime();
     })[0];
 
+    const questionSourceLabel =
+      currentRound.question_json.sourceType === "real"
+        ? "실제 설문/자료 기반"
+        : "게임용 샘플 랭킹";
+
     return (
       <main className="min-h-screen bg-[#080812] text-white flex items-center justify-center p-6">
         <ForceResetButton />
@@ -1294,6 +1451,38 @@ export default function Home() {
               </div>
             </div>
           )}
+
+          <div className="mt-6 rounded-3xl border border-cyan-300/30 bg-cyan-300/10 p-5">
+            <div className="flex items-center justify-between gap-3">
+              <div>
+                <p className="text-sm font-black tracking-[0.2em] text-cyan-200">
+                  정답 공개
+                </p>
+                <p className="mt-1 text-sm text-white/60">
+                  {questionSourceLabel} · {currentRound.question_json.source}
+                </p>
+              </div>
+
+              <p className="rounded-full bg-black/30 px-3 py-1 text-xs font-black text-cyan-200">
+                {getCategoryLabel(currentRound.question_json.category)}
+              </p>
+            </div>
+
+            <div className="mt-4 space-y-2">
+              {currentRound.answer_json.map((item, index) => (
+                <div
+                  key={`${item}-${index}`}
+                  className="flex items-center gap-3 rounded-2xl bg-black/25 px-4 py-3"
+                >
+                  <div className="grid h-9 w-9 place-items-center rounded-xl bg-cyan-300/15 font-black text-cyan-200">
+                    {index + 1}
+                  </div>
+
+                  <p className="font-black">{item}</p>
+                </div>
+              ))}
+            </div>
+          </div>
 
           <div className="mt-6 space-y-3">
             {roundSubmissions.map((submission, index) => (
