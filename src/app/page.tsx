@@ -1,7 +1,7 @@
 "use client";
 
 import { useCallback, useEffect, useMemo, useState } from "react";
-import { supabase } from "@/lib/supabase";
+import { supabase, supabaseConfigError } from "@/lib/supabase";
 import {
   DndContext,
   PointerSensor,
@@ -371,7 +371,72 @@ function SortableRankingItem({ item, index, disabled }: SortableRankingItemProps
   );
 }
 
-export default function Home() {
+function ForceResetButton({ onReset }: { onReset: () => void }) {
+  return (
+    <button
+      onClick={onReset}
+      className="fixed right-4 top-4 z-50 rounded-2xl border border-white/10 bg-black/70 px-4 py-3 text-sm font-bold text-white backdrop-blur-xl"
+    >
+      초기화
+    </button>
+  );
+}
+
+function CategorySelector({
+  disabled = false,
+  roomCategory,
+  selectedCategory,
+  onChange,
+}: {
+  disabled?: boolean;
+  roomCategory: QuestionCategory;
+  selectedCategory: QuestionCategory;
+  onChange: (category: QuestionCategory) => void;
+}) {
+  return (
+    <div className="mt-5 rounded-2xl border border-white/10 bg-black/25 p-4">
+      <div className="flex items-center justify-between gap-3">
+        <div>
+          <p className="font-black">카테고리</p>
+          <p className="mt-1 text-xs text-white/50">
+            {disabled
+              ? "방장이 선택한 주제로 진행돼요"
+              : "이번 게임의 문제 범위를 고르세요"}
+          </p>
+        </div>
+
+        <p className="rounded-full bg-cyan-300/10 px-3 py-1 text-xs font-black text-cyan-200">
+          {getCategoryLabel(roomCategory)}
+        </p>
+      </div>
+
+      <div className="mt-4 grid grid-cols-1 gap-2">
+        {categoryOptions.map((option) => {
+          const active = selectedCategory === option.value;
+
+          return (
+            <button
+              key={option.value}
+              type="button"
+              disabled={disabled}
+              onClick={() => onChange(option.value)}
+              className={`rounded-2xl border px-4 py-3 text-left transition ${
+                active
+                  ? "border-cyan-300/60 bg-cyan-300/15"
+                  : "border-white/10 bg-white/5"
+              } ${disabled ? "cursor-not-allowed opacity-70" : "hover:bg-white/10"}`}
+            >
+              <p className="font-black">{option.label}</p>
+              <p className="mt-1 text-xs text-white/50">{option.description}</p>
+            </button>
+          );
+        })}
+      </div>
+    </div>
+  );
+}
+
+function GameApp() {
   const [playerName, setPlayerName] = useState("");
   const [joinCode, setJoinCode] = useState("");
   const [message, setMessage] = useState("");
@@ -386,7 +451,7 @@ export default function Home() {
   const [orderedItems, setOrderedItems] = useState<string[]>([]);
   const [isSubmitting, setIsSubmitting] = useState(false);
 
-  const [tick, setTick] = useState(0);
+  const [nowMs, setNowMs] = useState(0);
   const [serverTimeOffset, setServerTimeOffset] = useState(0);
 
   const sensors = useSensors(
@@ -405,14 +470,15 @@ export default function Home() {
     return submissions.find((submission) => submission.player_id === playerId) ?? null;
   }, [submissions, playerId]);
 
-  const remainingSeconds = useMemo(() => {
-    if (!currentRound?.ends_at) return 0;
-
-    const endTime = new Date(currentRound.ends_at).getTime();
-    const correctedNow = Date.now() + serverTimeOffset;
-
-    return Math.max(0, Math.ceil((endTime - correctedNow) / 1000));
-  }, [currentRound?.ends_at, tick, serverTimeOffset]);
+  const remainingSeconds = currentRound?.ends_at
+    ? Math.max(
+        0,
+        Math.ceil(
+          (new Date(currentRound.ends_at).getTime() - (nowMs + serverTimeOffset)) /
+            1000
+        )
+      )
+    : 0;
 
   const sortedPlayers = useMemo(() => {
     return [...players].sort((a, b) => b.score - a.score);
@@ -488,6 +554,13 @@ export default function Home() {
       }
 
       if (!roundData) {
+        setCurrentRound(null);
+        setSubmissions([]);
+        setOrderedItems([]);
+        localStorage.removeItem("currentRoundId");
+        setMessage(
+          "현재 라운드 정보를 찾을 수 없습니다. 방 데이터가 오래되었거나 라운드가 삭제되었습니다. 초기화 후 새 방을 만들어 주세요."
+        );
         return;
       }
 
@@ -520,7 +593,7 @@ export default function Home() {
     }
   }, []);
 
-  async function syncServerTime() {
+  const syncServerTime = useCallback(async () => {
     const startedAt = Date.now();
 
     const { data, error } = await supabase.rpc("get_server_time");
@@ -542,7 +615,7 @@ export default function Home() {
     const estimatedServerNow = new Date(data).getTime() + roundTripMs / 2;
 
     setServerTimeOffset(estimatedServerNow - endedAt);
-  }
+  }, []);
 
   async function getCorrectedServerNow() {
     const startedAt = Date.now();
@@ -586,17 +659,6 @@ export default function Home() {
     window.location.replace("/");
   }
 
-  function ForceResetButton() {
-    return (
-      <button
-        onClick={forceReset}
-        className="fixed right-4 top-4 z-50 rounded-2xl border border-white/10 bg-black/70 px-4 py-3 text-sm font-bold text-white backdrop-blur-xl"
-      >
-        초기화
-      </button>
-    );
-  }
-
   async function updateRoomCategory(nextCategory: QuestionCategory) {
     setSelectedCategory(nextCategory);
 
@@ -624,16 +686,18 @@ export default function Home() {
     if (shouldReset) {
       localStorage.clear();
 
-      setRoom(null);
-      setPlayers([]);
-      setCurrentRound(null);
-      setSubmissions([]);
-      setPlayerId("");
-      setOrderedItems([]);
-      setPlayerName("");
-      setJoinCode("");
-      setMessage("");
-      setIsSubmitting(false);
+      queueMicrotask(() => {
+        setRoom(null);
+        setPlayers([]);
+        setCurrentRound(null);
+        setSubmissions([]);
+        setPlayerId("");
+        setOrderedItems([]);
+        setPlayerName("");
+        setJoinCode("");
+        setMessage("");
+        setIsSubmitting(false);
+      });
 
       window.history.replaceState(null, "", window.location.pathname);
       return;
@@ -644,30 +708,37 @@ export default function Home() {
     const savedPlayerName = localStorage.getItem("playerName");
 
     if (savedRoomId && savedPlayerId) {
-      setPlayerId(savedPlayerId);
-      setPlayerName(savedPlayerName ?? "");
-      fetchRoomState(savedRoomId);
+      queueMicrotask(() => {
+        setPlayerId(savedPlayerId);
+        setPlayerName(savedPlayerName ?? "");
+        fetchRoomState(savedRoomId);
+      });
     }
   }, [fetchRoomState]);
 
   useEffect(() => {
-    const timer = setInterval(() => {
-      setTick((value) => value + 1);
-    }, 1000);
+    const updateNow = () => {
+      setNowMs(Date.now());
+    };
+
+    queueMicrotask(updateNow);
+
+    const timer = setInterval(updateNow, 1000);
 
     return () => clearInterval(timer);
   }, []);
 
   useEffect(() => {
-    syncServerTime();
+    queueMicrotask(() => {
+      syncServerTime();
+    });
 
     const timer = setInterval(() => {
       syncServerTime();
     }, 30000);
 
     return () => clearInterval(timer);
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, []);
+  }, [syncServerTime]);
 
   useEffect(() => {
     const timer = setInterval(() => {
@@ -743,28 +814,6 @@ export default function Home() {
     };
   }, [room?.id, fetchRoomState]);
 
-  useEffect(() => {
-    if (!room || !currentRound) return;
-    if (room.status !== "playing") return;
-    if (players.length === 0) return;
-
-    const allSubmitted = submissions.length >= players.length;
-    const timeEnded = remainingSeconds <= 0;
-
-    if ((allSubmitted || timeEnded) && isHost) {
-      revealRoundResult();
-    }
-
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [
-    room?.status,
-    currentRound?.id,
-    players.length,
-    submissions.length,
-    remainingSeconds,
-    isHost,
-  ]);
-
   async function createRoom() {
     if (!playerName.trim()) {
       setMessage("이름을 먼저 입력해줘");
@@ -783,7 +832,7 @@ export default function Home() {
         current_round: 0,
         max_rounds: 10,
         difficulty: 1,
-        selected_category: selectedCategory,
+        selected_category: "all",
       })
       .select()
       .single();
@@ -995,7 +1044,7 @@ export default function Home() {
     await fetchRoomState(room.id);
   }
 
-  async function revealRoundResult() {
+  const revealRoundResult = useCallback(async () => {
     if (!room || !currentRound) return;
     if (room.status !== "playing") return;
 
@@ -1012,7 +1061,28 @@ export default function Home() {
         status: "result",
       })
       .eq("id", room.id);
-  }
+  }, [currentRound, room]);
+
+  useEffect(() => {
+    if (!room || !currentRound) return;
+    if (room.status !== "playing") return;
+    if (players.length === 0) return;
+
+    const allSubmitted = submissions.length >= players.length;
+    const timeEnded = remainingSeconds <= 0;
+
+    if ((allSubmitted || timeEnded) && isHost) {
+      revealRoundResult();
+    }
+  }, [
+    room,
+    currentRound,
+    players.length,
+    submissions.length,
+    remainingSeconds,
+    isHost,
+    revealRoundResult,
+  ]);
 
   async function startNextRound() {
     if (!room) return;
@@ -1111,54 +1181,10 @@ export default function Home() {
     });
   }
 
-  function CategorySelector({ disabled = false }: { disabled?: boolean }) {
-    return (
-      <div className="mt-5 rounded-2xl border border-white/10 bg-black/25 p-4">
-        <div className="flex items-center justify-between gap-3">
-          <div>
-            <p className="font-black">카테고리</p>
-            <p className="mt-1 text-xs text-white/50">
-              {disabled ? "방장이 선택한 주제로 진행돼요" : "이번 게임의 문제 범위를 고르세요"}
-            </p>
-          </div>
-
-          {room && (
-            <p className="rounded-full bg-cyan-300/10 px-3 py-1 text-xs font-black text-cyan-200">
-              {getCategoryLabel(room.selected_category ?? "all")}
-            </p>
-          )}
-        </div>
-
-        <div className="mt-4 grid grid-cols-1 gap-2">
-          {categoryOptions.map((option) => {
-            const active = selectedCategory === option.value;
-
-            return (
-              <button
-                key={option.value}
-                type="button"
-                disabled={disabled}
-                onClick={() => updateRoomCategory(option.value)}
-                className={`rounded-2xl border px-4 py-3 text-left transition ${
-                  active
-                    ? "border-cyan-300/60 bg-cyan-300/15"
-                    : "border-white/10 bg-white/5"
-                } ${disabled ? "cursor-not-allowed opacity-70" : "hover:bg-white/10"}`}
-              >
-                <p className="font-black">{option.label}</p>
-                <p className="mt-1 text-xs text-white/50">{option.description}</p>
-              </button>
-            );
-          })}
-        </div>
-      </div>
-    );
-  }
-
   if (!room) {
     return (
       <main className="min-h-screen bg-[#080812] text-white flex items-center justify-center p-6">
-        <ForceResetButton />
+        <ForceResetButton onReset={forceReset} />
 
         <div className="w-full max-w-md rounded-3xl border border-white/10 bg-white/10 p-6 backdrop-blur-xl">
           <p className="text-sm font-bold tracking-[0.2em] text-cyan-300">
@@ -1177,8 +1203,6 @@ export default function Home() {
             placeholder="내 이름"
             className="mt-6 w-full rounded-2xl border border-white/10 bg-black/30 px-4 py-4 text-white outline-none focus:border-cyan-300"
           />
-
-          <CategorySelector />
 
           <button
             onClick={createRoom}
@@ -1217,7 +1241,7 @@ export default function Home() {
   if (room.status === "waiting") {
     return (
       <main className="min-h-screen bg-[#080812] text-white flex items-center justify-center p-6">
-        <ForceResetButton />
+        <ForceResetButton onReset={forceReset} />
 
         <div className="w-full max-w-md rounded-3xl border border-white/10 bg-white/10 p-6 backdrop-blur-xl">
           <p className="text-sm font-bold tracking-[0.2em] text-cyan-300">
@@ -1233,7 +1257,12 @@ export default function Home() {
             </p>
           </div>
 
-          <CategorySelector disabled={!isHost} />
+          <CategorySelector
+            disabled={!isHost}
+            roomCategory={room.selected_category ?? "all"}
+            selectedCategory={selectedCategory}
+            onChange={updateRoomCategory}
+          />
 
           <div className="mt-5 rounded-2xl border border-white/10 bg-black/30 p-4">
             <div className="flex items-center justify-between">
@@ -1294,7 +1323,7 @@ export default function Home() {
   if (room.status === "playing" && currentRound) {
     return (
       <main className="min-h-screen bg-[#080812] text-white flex items-center justify-center p-6">
-        <ForceResetButton />
+        <ForceResetButton onReset={forceReset} />
 
         <div className="w-full max-w-xl rounded-3xl border border-white/10 bg-white/10 p-6 backdrop-blur-xl">
           <div className="flex items-start justify-between gap-4">
@@ -1421,7 +1450,7 @@ export default function Home() {
 
     return (
       <main className="min-h-screen bg-[#080812] text-white flex items-center justify-center p-6">
-        <ForceResetButton />
+        <ForceResetButton onReset={forceReset} />
 
         <div className="w-full max-w-xl rounded-3xl border border-white/10 bg-white/10 p-6 backdrop-blur-xl">
           <p className="text-sm font-bold tracking-[0.2em] text-cyan-300">
@@ -1563,7 +1592,7 @@ export default function Home() {
   if (room.status === "finished") {
     return (
       <main className="min-h-screen bg-[#080812] text-white flex items-center justify-center p-6">
-        <ForceResetButton />
+        <ForceResetButton onReset={forceReset} />
 
         <div className="w-full max-w-xl rounded-3xl border border-white/10 bg-white/10 p-6 text-center backdrop-blur-xl">
           <p className="text-sm font-bold tracking-[0.2em] text-cyan-300">
@@ -1607,5 +1636,52 @@ export default function Home() {
     );
   }
 
-  return null;
+  return (
+    <main className="min-h-screen bg-[#080812] text-white flex items-center justify-center p-6">
+      <ForceResetButton onReset={forceReset} />
+
+      <div className="w-full max-w-md rounded-3xl border border-white/10 bg-white/10 p-6 backdrop-blur-xl">
+        <p className="text-sm font-bold tracking-[0.2em] text-pink-300">
+          RECOVERY
+        </p>
+
+        <h1 className="mt-3 text-3xl font-black">게임 상태를 복구할 수 없습니다</h1>
+
+        <p className="mt-3 leading-7 text-white/70">
+          저장된 방 상태와 라운드 데이터가 맞지 않습니다. 초기화 후 새로 입장해 주세요.
+        </p>
+
+        {message && (
+          <p className="mt-4 rounded-2xl bg-black/30 p-4 text-sm text-white/80">
+            {message}
+          </p>
+        )}
+
+        <button
+          onClick={forceReset}
+          className="mt-5 w-full rounded-2xl bg-cyan-400 px-5 py-4 font-black text-black"
+        >
+          초기화하고 처음으로
+        </button>
+      </div>
+    </main>
+  );
+}
+
+export default function Home() {
+  if (supabaseConfigError) {
+    return (
+      <main className="flex min-h-screen items-center justify-center bg-[#080812] p-6 text-white">
+        <div className="w-full max-w-md rounded-3xl border border-white/10 bg-white/10 p-6 backdrop-blur-xl">
+          <p className="text-sm font-bold tracking-[0.2em] text-pink-300">
+            CONFIG ERROR
+          </p>
+          <h1 className="mt-3 text-3xl font-black">Supabase 설정 필요</h1>
+          <p className="mt-3 leading-7 text-white/70">{supabaseConfigError}</p>
+        </div>
+      </main>
+    );
+  }
+
+  return <GameApp />;
 }
